@@ -1,0 +1,9 @@
+{
+  "name": "watchdir",
+  "image": "mcr.microsoft.com/devcontainers/cpp:ubuntu",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-vscode.cpptools", "ms-vscode.cmake-tools"]
+    }
+  }
+}
