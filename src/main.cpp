@@ -7,6 +7,7 @@
 #include <fstream>
 #include <optional>
 #include <ctime>
+#include <map>
 
 bool is_noise(const std::string &name)
 {
@@ -82,6 +83,7 @@ int main(int argc, char *argv[])
     std::cout << "watching " << path << "...\n";
 
     alignas(inotify_event) char buf[4096];
+    std::map<std::string, uint64_t> hashes;
     while (true)
     {
         ssize_t n = read(fd, buf, sizeof(buf));
@@ -99,14 +101,40 @@ int main(int argc, char *argv[])
 
             std::string name = ev->len > 0 ? ev->name : "";
 
-            if (!is_noise(name))
+            if (!name.empty() && !is_noise(name))
             {
-                std::cout << "[" << timestamp() << "] " << event_name(ev->mask);
-                if (!name.empty())
+                std::string full = std::string(path) + "/" + name;
+                const char *label = nullptr;
+
+                if (ev->mask & IN_CREATE)
                 {
-                    std::cout << ": " << name;
+                    auto h = hash_file(full);
+                    if (h)
+                        hashes[full] = *h;
+                    label = "created";
                 }
-                std::cout << "\n";
+                else if (ev->mask & IN_DELETE)
+                {
+                    hashes.erase(full);
+                    label = "deleted";
+                }
+                else if (ev->mask & IN_CLOSE_WRITE)
+                {
+                    auto h = hash_file(full);
+                    if (h)
+                    {
+                        auto it = hashes.find(full);
+                        bool changed = (it == hashes.end() || it->second != *h);
+                        hashes[full] = *h;
+                        if (changed)
+                            label = "modified";
+                    }
+                }
+
+                if (label)
+                {
+                    std::cout << "[" << timestamp() << "] " << label << ": " << name << "\n";
+                }
             }
 
             ptr += sizeof(inotify_event) + ev->len;
