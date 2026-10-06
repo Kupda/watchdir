@@ -4,6 +4,9 @@
 #include <sys/inotify.h>
 #include <unistd.h>
 #include <string>
+#include <fstream>
+#include <optional>
+#include <ctime>
 
 bool is_noise(const std::string &name)
 {
@@ -18,9 +21,39 @@ const char *event_name(uint32_t mask)
         return "created";
     if (mask & IN_DELETE)
         return "deleted";
-    if (mask & IN_MODIFY)
+    if (mask & IN_CLOSE_WRITE)
         return "modified";
     return "other";
+}
+
+std::optional<uint64_t> hash_file(const std::string &path)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        return std::nullopt;
+
+    uint64_t h = 14695981039346656037ULL;
+    char buf[4096];
+    while (in.read(buf, sizeof(buf)) || in.gcount() > 0)
+    {
+        for (std::streamsize i = 0; i < in.gcount(); ++i)
+        {
+            h ^= static_cast<unsigned char>(buf[i]);
+            h *= 1099511628211ULL;
+        }
+    }
+    return h;
+}
+
+std::string timestamp()
+{
+    std::time_t now = std::time(nullptr);
+    std::tm tm_now{};
+    localtime_r(&now, &tm_now);
+
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%d.%m.%Y %H:%M:%S", &tm_now);
+    return buf;
 }
 
 int main(int argc, char *argv[])
@@ -30,6 +63,7 @@ int main(int argc, char *argv[])
     {
         path = argv[1];
     }
+
     int fd = inotify_init1(0);
     if (fd == -1)
     {
@@ -37,7 +71,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    int wd = inotify_add_watch(fd, path, IN_CREATE | IN_DELETE | IN_MODIFY);
+    int wd = inotify_add_watch(fd, path, IN_CREATE | IN_DELETE | IN_CLOSE_WRITE);
     if (wd == -1)
     {
         perror("inotify_add_watch");
@@ -67,7 +101,7 @@ int main(int argc, char *argv[])
 
             if (!is_noise(name))
             {
-                std::cout << event_name(ev->mask);
+                std::cout << "[" << timestamp() << "] " << event_name(ev->mask);
                 if (!name.empty())
                 {
                     std::cout << ": " << name;
