@@ -8,23 +8,21 @@
 #include <optional>
 #include <ctime>
 #include <map>
+#include <csignal>
+#include <cerrno>
+
+volatile sig_atomic_t g_stop = 0;
+
+void on_sigint(int)
+{
+    g_stop = 1;
+}
 
 bool is_noise(const std::string &name)
 {
     const std::string ext = ".swp";
     return name.size() >= ext.size() &&
            name.compare(name.size() - ext.size(), ext.size(), ext) == 0;
-}
-
-const char *event_name(uint32_t mask)
-{
-    if (mask & IN_CREATE)
-        return "created";
-    if (mask & IN_DELETE)
-        return "deleted";
-    if (mask & IN_CLOSE_WRITE)
-        return "modified";
-    return "other";
 }
 
 std::optional<uint64_t> hash_file(const std::string &path)
@@ -59,6 +57,11 @@ std::string timestamp()
 
 int main(int argc, char *argv[])
 {
+    struct sigaction sa{};
+    sa.sa_handler = on_sigint;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, nullptr);
     const char *path = ".";
     if (argc > 1)
     {
@@ -84,11 +87,13 @@ int main(int argc, char *argv[])
 
     alignas(inotify_event) char buf[4096];
     std::map<std::string, uint64_t> hashes;
-    while (true)
+    while (!g_stop)
     {
         ssize_t n = read(fd, buf, sizeof(buf));
         if (n == -1)
         {
+            if (errno == EINTR)
+                continue;
             perror("read");
             close(fd);
             return 1;
@@ -141,6 +146,7 @@ int main(int argc, char *argv[])
         }
     }
 
+    std::cout << "\nstopping...\n";
     close(fd);
     return 0;
 }
